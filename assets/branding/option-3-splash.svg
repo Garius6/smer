@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" role="img" aria-label="СМЭР">
+  <rect width="1080" height="1920" fill="#FFF8F5"/>
+  <g transform="translate(348 626) scale(.75)">
+    <rect width="512" height="512" rx="128" fill="#FFF8F5"/>
+    <path d="M160 228v-52c0-18 14-32 32-32h128c18 0 32 14 32 32v128c0 18-14 32-32 32h-52" fill="none" stroke="#9B5A42" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="230" cy="282" r="70" fill="#E8B394"/>
+    <path d="M160 336v-52c0-18 14-32 32-32h52" fill="none" stroke="#9B5A42" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="540" y="1090" text-anchor="middle" fill="#42251C" font-family="sans-serif" font-size="88" font-weight="700" letter-spacing="12">СМЭР</text>
+  <text x="540" y="1160" text-anchor="middle" fill="#755348" font-family="sans-serif" font-size="34">дневник наблюдений</text>
+</svg>
