@@ -15,6 +15,7 @@ class AppSecurity {
   static const _databasePasswordKey = 'database_password';
   static const _pinHashKey = 'pin_hash';
   static const _pinSaltKey = 'pin_salt';
+  static const _pinLengthKey = 'pin_length';
 
   final FlutterSecureStorage _storage;
   final LocalAuthentication _localAuthentication;
@@ -35,7 +36,11 @@ class AppSecurity {
     final salt = _randomValue();
     await _storage.write(key: _pinSaltKey, value: salt);
     await _storage.write(key: _pinHashKey, value: hashPin(pin, salt));
+    await _storage.write(key: _pinLengthKey, value: '${pin.length}');
   }
+
+  Future<int> pinLength() async =>
+      int.tryParse(await _storage.read(key: _pinLengthKey) ?? '') ?? 6;
 
   Future<bool> verifyPin(String pin) async {
     final salt = await _storage.read(key: _pinSaltKey);

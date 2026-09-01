@@ -9,8 +9,6 @@ abstract class SmerStore {
   Future<void> deleteEntry(String id);
   Future<List<CustomEmotion>> loadCustomEmotions();
   Future<void> saveCustomEmotion(CustomEmotion emotion);
-  Future<bool> isOnboardingSeen();
-  Future<void> markOnboardingSeen();
 }
 
 class SqliteSmerStore implements SmerStore {
@@ -83,18 +81,6 @@ class SqliteSmerStore implements SmerStore {
         'name': emotion.name,
         'group_name': emotion.group,
       }, conflictAlgorithm: sqlcipher.ConflictAlgorithm.replace);
-  @override
-  Future<bool> isOnboardingSeen() async => (await (await _db).query(
-    'settings',
-    where: 'key = ?',
-    whereArgs: ['onboarding_seen'],
-  )).isNotEmpty;
-  @override
-  Future<void> markOnboardingSeen() async => (await _db).insert('settings', {
-    'key': 'onboarding_seen',
-    'value': 'true',
-  }, conflictAlgorithm: sqlcipher.ConflictAlgorithm.replace);
-
   Future<void> _createEmotionCatalog(sqlcipher.Database db) => db.execute(
     'CREATE TABLE custom_emotions(name TEXT PRIMARY KEY, group_name TEXT NOT NULL)',
   );

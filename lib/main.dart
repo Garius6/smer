@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:pinput/pinput.dart';
-
 import 'data/smer_store.dart';
 import 'models/journal_analysis.dart';
 import 'models/smer_entry.dart';
@@ -92,7 +90,7 @@ class SmerApp extends StatelessWidget {
     supportedLocales: const [Locale('ru')],
     theme: ThemeData(
       colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xFF9B5A42),
+        seedColor: const Color(0xFF85695E),
         brightness: Brightness.light,
       ),
       scaffoldBackgroundColor: const Color(0xFFFFF8F5),
@@ -184,22 +182,17 @@ class PinSetupPage extends StatefulWidget {
 }
 
 class _PinSetupPageState extends State<PinSetupPage> {
-  final _controller = TextEditingController();
+  static const _pinLength = 4;
+  var _pin = '';
   String? _firstPin;
   String? _error;
   var _saving = false;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
 
   Future<void> _onCompleted(String pin) async {
     if (_firstPin == null) {
       setState(() {
         _firstPin = pin;
-        _controller.clear();
+        _pin = '';
       });
       return;
     }
@@ -207,7 +200,7 @@ class _PinSetupPageState extends State<PinSetupPage> {
       setState(() {
         _error = 'PIN-коды не совпадают. Попробуйте ещё раз.';
         _firstPin = null;
-        _controller.clear();
+        _pin = '';
       });
       return;
     }
@@ -216,47 +209,33 @@ class _PinSetupPageState extends State<PinSetupPage> {
     if (mounted) widget.onComplete();
   }
 
+  void _appendDigit(String digit) {
+    if (_saving || _pin.length == _pinLength) return;
+    final pin = '$_pin$digit';
+    setState(() {
+      _pin = pin;
+      _error = null;
+    });
+    if (pin.length == _pinLength) _onCompleted(pin);
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     body: SafeArea(
-      child: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Icon(
-                Icons.lock_outline,
-                size: 48,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(height: 20),
-              Text(
-                _firstPin == null ? 'Придумайте PIN-код' : 'Повторите PIN-код',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _firstPin == null
-                    ? 'Шесть цифр защитят дневник и зашифрованную базу записей.'
-                    : 'Введите те же шесть цифр ещё раз.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-              const SizedBox(height: 32),
-              _PinInput(
-                controller: _controller,
-                errorText: _error,
-                enabled: !_saving,
-                onChanged: (_) {
-                  if (_error != null) setState(() => _error = null);
-                },
-                onCompleted: _onCompleted,
-              ),
-            ],
-          ),
+      child: _PinScreen(
+        title: _firstPin == null ? 'Придумайте PIN-код' : 'Повторите PIN-код',
+        subtitle: _firstPin == null
+            ? 'Четыре цифры защитят дневник и ваши записи.'
+            : 'Введите те же четыре цифры ещё раз.',
+        value: _pin,
+        length: _pinLength,
+        errorText: _error,
+        enabled: !_saving,
+        onDigit: _appendDigit,
+        onBackspace: () => setState(
+          () => _pin = _pin.isEmpty ? '' : _pin.substring(0, _pin.length - 1),
         ),
+        onClear: () => setState(() => _pin = ''),
       ),
     ),
   );
@@ -276,25 +255,26 @@ class UnlockPage extends StatefulWidget {
 }
 
 class _UnlockPageState extends State<UnlockPage> {
-  final _controller = TextEditingController();
+  var _pin = '';
   var _error = false;
   var _biometricsAvailable = false;
+  var _pinLength = 4;
 
   @override
   void initState() {
     super.initState();
     _loadBiometrics();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+    _loadPinLength();
   }
 
   Future<void> _loadBiometrics() async {
     final available = await widget.security.canUseBiometrics();
     if (mounted) setState(() => _biometricsAvailable = available);
+  }
+
+  Future<void> _loadPinLength() async {
+    final length = await widget.security.pinLength();
+    if (mounted) setState(() => _pinLength = length);
   }
 
   Future<void> _unlockWithPin(String pin) async {
@@ -304,8 +284,18 @@ class _UnlockPageState extends State<UnlockPage> {
     }
     setState(() {
       _error = true;
-      _controller.clear();
+      _pin = '';
     });
+  }
+
+  void _appendDigit(String digit) {
+    if (_pin.length == _pinLength) return;
+    final pin = '$_pin$digit';
+    setState(() {
+      _pin = pin;
+      _error = false;
+    });
+    if (pin.length == _pinLength) _unlockWithPin(pin);
   }
 
   Future<void> _unlockWithBiometrics() async {
@@ -317,113 +307,211 @@ class _UnlockPageState extends State<UnlockPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
     body: SafeArea(
-      child: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+      child: _PinScreen(
+        title: 'Введите PIN-код',
+        subtitle: 'Дневник защищён и доступен только вам.',
+        value: _pin,
+        length: _pinLength,
+        errorText: _error ? 'Неверный PIN-код' : null,
+        onDigit: _appendDigit,
+        onBackspace: () => setState(
+          () => _pin = _pin.isEmpty ? '' : _pin.substring(0, _pin.length - 1),
+        ),
+        onClear: () => setState(() => _pin = ''),
+        biometricAvailable: _biometricsAvailable,
+        onBiometrics: _unlockWithBiometrics,
+      ),
+    ),
+  );
+}
+
+class _PinScreen extends StatelessWidget {
+  const _PinScreen({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.length,
+    this.errorText,
+    this.enabled = true,
+    required this.onDigit,
+    required this.onBackspace,
+    required this.onClear,
+    this.biometricAvailable = false,
+    this.onBiometrics,
+  });
+  final String title;
+  final String subtitle;
+  final String value;
+  final int length;
+  final String? errorText;
+  final bool enabled;
+  final ValueChanged<String> onDigit;
+  final VoidCallback onBackspace;
+  final VoidCallback onClear;
+  final bool biometricAvailable;
+  final VoidCallback? onBiometrics;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(32, 36, 32, 16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 112,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Icon(
-                Icons.lock_outline,
-                size: 48,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(height: 20),
               Text(
-                'Дневник заблокирован',
+                title,
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 32),
-              _PinInput(
-                controller: _controller,
-                errorText: _error ? 'Неверный PIN-код' : null,
-                onChanged: (_) {
-                  if (_error) setState(() => _error = false);
-                },
-                onCompleted: _unlockWithPin,
-              ),
-              if (_biometricsAvailable) ...[
-                const SizedBox(height: 12),
-                TextButton.icon(
-                  onPressed: _unlockWithBiometrics,
-                  icon: const Icon(Icons.fingerprint),
-                  label: const Text('Войти по биометрии'),
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
                 ),
-              ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
             ],
           ),
+        ),
+        const Spacer(flex: 3),
+        _PinDots(value: value, length: length, hasError: errorText != null),
+        SizedBox(height: errorText == null ? 28 : 8),
+        if (errorText != null)
+          Text(
+            errorText!,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        const Spacer(flex: 4),
+        _PinKeypad(
+          enabled: enabled,
+          onDigit: onDigit,
+          onBackspace: onBackspace,
+          onClear: onClear,
+        ),
+        if (biometricAvailable) ...[
+          const SizedBox(height: 12),
+          TextButton.icon(
+            onPressed: onBiometrics,
+            icon: const Icon(Icons.fingerprint),
+            label: const Text('Войти по биометрии'),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+class _PinDots extends StatelessWidget {
+  const _PinDots({
+    required this.value,
+    required this.length,
+    required this.hasError,
+  });
+
+  final String value;
+  final int length;
+  final bool hasError;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: List.generate(
+      length,
+      (index) => Container(
+        width: 20,
+        height: 20,
+        margin: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: hasError
+              ? Theme.of(context).colorScheme.error
+              : index < value.length
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.outlineVariant,
+          shape: BoxShape.circle,
         ),
       ),
     ),
   );
 }
 
-class _PinInput extends StatelessWidget {
-  const _PinInput({
-    required this.controller,
-    this.errorText,
-    this.enabled = true,
-    this.onChanged,
-    required this.onCompleted,
+class _PinKeypad extends StatelessWidget {
+  const _PinKeypad({
+    required this.enabled,
+    required this.onDigit,
+    required this.onBackspace,
+    required this.onClear,
   });
-  final TextEditingController controller;
-  final String? errorText;
+
   final bool enabled;
-  final ValueChanged<String>? onChanged;
-  final ValueChanged<String> onCompleted;
+  final ValueChanged<String> onDigit;
+  final VoidCallback onBackspace;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      for (final row in const [
+        ['1', '2', '3'],
+        ['4', '5', '6'],
+        ['7', '8', '9'],
+        ['clear', '0', 'backspace'],
+      ])
+        Row(
+          children: row
+              .map(
+                (key) => Expanded(
+                  child: _PinKey(
+                    keyName: key,
+                    enabled: enabled,
+                    onPressed: () {
+                      if (key == 'clear') return onClear();
+                      if (key == 'backspace') return onBackspace();
+                      onDigit(key);
+                    },
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+    ],
+  );
+}
+
+class _PinKey extends StatelessWidget {
+  const _PinKey({
+    required this.keyName,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final String keyName;
+  final bool enabled;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final defaultTheme = PinTheme(
-      width: 48,
-      height: 56,
-      textStyle: Theme.of(context).textTheme.headlineSmall,
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.outline),
+    final child = switch (keyName) {
+      'clear' => const Icon(Icons.close, size: 28),
+      'backspace' => const Icon(Icons.backspace_outlined, size: 26),
+      _ => Text(keyName, style: Theme.of(context).textTheme.headlineMedium),
+    };
+    return Semantics(
+      button: true,
+      label: keyName == 'clear'
+          ? 'Очистить PIN-код'
+          : keyName == 'backspace'
+          ? 'Удалить последнюю цифру'
+          : keyName,
+      child: InkResponse(
+        onTap: enabled ? onPressed : null,
+        radius: 36,
+        child: SizedBox(height: 80, child: Center(child: child)),
       ),
-    );
-    return Column(
-      children: [
-        Pinput(
-          controller: controller,
-          length: 6,
-          autofocus: true,
-          enabled: enabled,
-          obscureText: true,
-          obscuringCharacter: '•',
-          enableInteractiveSelection: false,
-          enableSuggestions: false,
-          toolbarEnabled: false,
-          hapticFeedbackType: HapticFeedbackType.lightImpact,
-          defaultPinTheme: defaultTheme,
-          focusedPinTheme: defaultTheme.copyWith(
-            decoration: defaultTheme.decoration!.copyWith(
-              border: Border.all(color: colors.primary, width: 2),
-            ),
-          ),
-          errorPinTheme: defaultTheme.copyWith(
-            decoration: defaultTheme.decoration!.copyWith(
-              border: Border.all(color: colors.error, width: 2),
-            ),
-          ),
-          forceErrorState: errorText != null,
-          onChanged: onChanged,
-          onCompleted: onCompleted,
-          separatorBuilder: (_) => const SizedBox(width: 8),
-        ),
-        if (errorText != null) ...[
-          const SizedBox(height: 12),
-          Text(
-            errorText!,
-            style: TextStyle(color: colors.error),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ],
     );
   }
 }
@@ -442,28 +530,6 @@ class _JournalPageState extends State<JournalPage> {
   void initState() {
     super.initState();
     _loadEntries();
-    _showOnboardingIfNeeded();
-  }
-
-  Future<void> _showOnboardingIfNeeded() async {
-    if (await widget.store.isOnboardingSeen() || !mounted) return;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Дневник СМЭР'),
-        content: const Text(
-          'СМЭР помогает заметить связь между ситуацией, автоматическими мыслями, эмоциями и реакциями. Это инструмент самонаблюдения, а не замена медицинской или психологической помощи.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Понятно'),
-          ),
-        ],
-      ),
-    );
-    await widget.store.markOnboardingSeen();
   }
 
   Future<void> _loadEntries() async {
@@ -660,6 +726,10 @@ class EntryViewPage extends StatelessWidget {
             child: const Text('Отмена'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Удалить'),
           ),

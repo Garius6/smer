@@ -60,6 +60,17 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. Release Versioning
+
+**Never publish a tag without checking the packaged application version.**
+
+Before every commit and before creating or pushing a release tag:
+- Read `pubspec.yaml` and report its `version: build-name+build-number`.
+- For a release tag, require an exact match: tag `vX.Y.Z` ↔ build name `X.Y.Z`.
+- Ensure the build number is greater than the last published build number.
+- Build the release APK and verify its `versionName` and `versionCode` from the
+  APK manifest before publishing.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
