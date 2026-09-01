@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smer/models/journal_analysis.dart';
 import 'package:smer/models/smer_entry.dart';
+import 'package:smer/security/app_security.dart';
 
 void main() {
   test('entry survives SQLite row conversion', () {
@@ -54,5 +55,20 @@ void main() {
     expect(analysis.emotions.first.name, 'Тревога');
     expect(analysis.emotions.first.count, 2);
     expect(analysis.emotions.first.averageIntensity, 70);
+  });
+
+  test('PIN hash depends on both PIN and salt', () {
+    final hash = AppSecurity.hashPin('1234', 'salt');
+
+    expect(hash, AppSecurity.hashPin('1234', 'salt'));
+    expect(hash, isNot(AppSecurity.hashPin('1235', 'salt')));
+    expect(hash, isNot(AppSecurity.hashPin('1234', 'other-salt')));
+  });
+
+  test('custom emotion keeps its group', () {
+    const emotion = CustomEmotion(name: 'Надежда', group: 'Ожидание');
+
+    expect(emotion.name, 'Надежда');
+    expect(emotion.group, 'Ожидание');
   });
 }

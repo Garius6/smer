@@ -1,5 +1,12 @@
 import 'dart:convert';
 
+class CustomEmotion {
+  const CustomEmotion({required this.name, required this.group});
+
+  final String name;
+  final String group;
+}
+
 class SmerEmotion {
   const SmerEmotion({required this.name, required this.intensity});
   final String name;

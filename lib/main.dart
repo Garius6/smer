@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:pinput/pinput.dart';
 
 import 'data/smer_store.dart';
 import 'models/journal_analysis.dart';
 import 'models/smer_entry.dart';
+import 'security/app_security.dart';
 
 const emotionGroups = {
   'Радость': [
@@ -32,11 +34,54 @@ const emotionGroups = {
   ],
 };
 
-void main() => runApp(SmerApp(store: SqliteSmerStore()));
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const SmerBootstrap());
+}
+
+class SmerBootstrap extends StatefulWidget {
+  const SmerBootstrap({super.key});
+
+  @override
+  State<SmerBootstrap> createState() => _SmerBootstrapState();
+}
+
+class _SmerBootstrapState extends State<SmerBootstrap> {
+  AppSecurity? _security;
+  SqliteSmerStore? _store;
+
+  @override
+  void initState() {
+    super.initState();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    final security = AppSecurity();
+    final databasePassword = await security.databasePassword();
+    if (mounted) {
+      setState(() {
+        _security = security;
+        _store = SqliteSmerStore(databasePassword: databasePassword);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_security == null || _store == null) {
+      return const MaterialApp(
+        home: Scaffold(body: Center(child: CircularProgressIndicator())),
+      );
+    }
+    return SmerApp(store: _store!, security: _security!);
+  }
+}
 
 class SmerApp extends StatelessWidget {
-  const SmerApp({super.key, required this.store});
+  const SmerApp({super.key, required this.store, required this.security});
   final SmerStore store;
+  final AppSecurity security;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -57,8 +102,330 @@ class SmerApp extends StatelessWidget {
       ),
       useMaterial3: true,
     ),
-    home: JournalPage(store: store),
+    home: AppLockGate(store: store, security: security),
   );
+}
+
+class AppLockGate extends StatefulWidget {
+  const AppLockGate({super.key, required this.store, required this.security});
+  final SmerStore store;
+  final AppSecurity security;
+
+  @override
+  State<AppLockGate> createState() => _AppLockGateState();
+}
+
+class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
+  bool? _hasPin;
+  var _isLocked = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadPinState();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _loadPinState() async {
+    final hasPin = await widget.security.hasPin();
+    if (mounted) setState(() => _hasPin = hasPin);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_hasPin == true &&
+        (state == AppLifecycleState.inactive ||
+            state == AppLifecycleState.paused)) {
+      setState(() => _isLocked = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_hasPin == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (!_hasPin!) {
+      return PinSetupPage(
+        security: widget.security,
+        onComplete: () => setState(() {
+          _hasPin = true;
+          _isLocked = false;
+        }),
+      );
+    }
+    if (_isLocked) {
+      return UnlockPage(
+        security: widget.security,
+        onUnlocked: () => setState(() => _isLocked = false),
+      );
+    }
+    return JournalPage(store: widget.store);
+  }
+}
+
+class PinSetupPage extends StatefulWidget {
+  const PinSetupPage({
+    super.key,
+    required this.security,
+    required this.onComplete,
+  });
+  final AppSecurity security;
+  final VoidCallback onComplete;
+
+  @override
+  State<PinSetupPage> createState() => _PinSetupPageState();
+}
+
+class _PinSetupPageState extends State<PinSetupPage> {
+  final _controller = TextEditingController();
+  String? _firstPin;
+  String? _error;
+  var _saving = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onCompleted(String pin) async {
+    if (_firstPin == null) {
+      setState(() {
+        _firstPin = pin;
+        _controller.clear();
+      });
+      return;
+    }
+    if (pin != _firstPin) {
+      setState(() {
+        _error = 'PIN-коды не совпадают. Попробуйте ещё раз.';
+        _firstPin = null;
+        _controller.clear();
+      });
+      return;
+    }
+    setState(() => _saving = true);
+    await widget.security.setPin(pin);
+    if (mounted) widget.onComplete();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Icon(
+                Icons.lock_outline,
+                size: 48,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(height: 20),
+              Text(
+                _firstPin == null ? 'Придумайте PIN-код' : 'Повторите PIN-код',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _firstPin == null
+                    ? 'Шесть цифр защитят дневник и зашифрованную базу записей.'
+                    : 'Введите те же шесть цифр ещё раз.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+              const SizedBox(height: 32),
+              _PinInput(
+                controller: _controller,
+                errorText: _error,
+                enabled: !_saving,
+                onChanged: (_) {
+                  if (_error != null) setState(() => _error = null);
+                },
+                onCompleted: _onCompleted,
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class UnlockPage extends StatefulWidget {
+  const UnlockPage({
+    super.key,
+    required this.security,
+    required this.onUnlocked,
+  });
+  final AppSecurity security;
+  final VoidCallback onUnlocked;
+
+  @override
+  State<UnlockPage> createState() => _UnlockPageState();
+}
+
+class _UnlockPageState extends State<UnlockPage> {
+  final _controller = TextEditingController();
+  var _error = false;
+  var _biometricsAvailable = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBiometrics();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadBiometrics() async {
+    final available = await widget.security.canUseBiometrics();
+    if (mounted) setState(() => _biometricsAvailable = available);
+  }
+
+  Future<void> _unlockWithPin(String pin) async {
+    if (await widget.security.verifyPin(pin)) {
+      if (mounted) widget.onUnlocked();
+      return;
+    }
+    setState(() {
+      _error = true;
+      _controller.clear();
+    });
+  }
+
+  Future<void> _unlockWithBiometrics() async {
+    if (await widget.security.authenticateWithBiometrics() && mounted) {
+      widget.onUnlocked();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Icon(
+                Icons.lock_outline,
+                size: 48,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Дневник заблокирован',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 32),
+              _PinInput(
+                controller: _controller,
+                errorText: _error ? 'Неверный PIN-код' : null,
+                onChanged: (_) {
+                  if (_error) setState(() => _error = false);
+                },
+                onCompleted: _unlockWithPin,
+              ),
+              if (_biometricsAvailable) ...[
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  onPressed: _unlockWithBiometrics,
+                  icon: const Icon(Icons.fingerprint),
+                  label: const Text('Войти по биометрии'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _PinInput extends StatelessWidget {
+  const _PinInput({
+    required this.controller,
+    this.errorText,
+    this.enabled = true,
+    this.onChanged,
+    required this.onCompleted,
+  });
+  final TextEditingController controller;
+  final String? errorText;
+  final bool enabled;
+  final ValueChanged<String>? onChanged;
+  final ValueChanged<String> onCompleted;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final defaultTheme = PinTheme(
+      width: 48,
+      height: 56,
+      textStyle: Theme.of(context).textTheme.headlineSmall,
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.outline),
+      ),
+    );
+    return Column(
+      children: [
+        Pinput(
+          controller: controller,
+          length: 6,
+          autofocus: true,
+          enabled: enabled,
+          obscureText: true,
+          obscuringCharacter: '•',
+          enableInteractiveSelection: false,
+          enableSuggestions: false,
+          toolbarEnabled: false,
+          hapticFeedbackType: HapticFeedbackType.lightImpact,
+          defaultPinTheme: defaultTheme,
+          focusedPinTheme: defaultTheme.copyWith(
+            decoration: defaultTheme.decoration!.copyWith(
+              border: Border.all(color: colors.primary, width: 2),
+            ),
+          ),
+          errorPinTheme: defaultTheme.copyWith(
+            decoration: defaultTheme.decoration!.copyWith(
+              border: Border.all(color: colors.error, width: 2),
+            ),
+          ),
+          forceErrorState: errorText != null,
+          onChanged: onChanged,
+          onCompleted: onCompleted,
+          separatorBuilder: (_) => const SizedBox(width: 8),
+        ),
+        if (errorText != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            errorText!,
+            style: TextStyle(color: colors.error),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ],
+    );
+  }
 }
 
 class JournalPage extends StatefulWidget {
@@ -451,7 +818,8 @@ class _EntryEditorPageState extends State<EntryEditorPage> {
     final result = await Navigator.push<List<SmerEmotion>>(
       context,
       MaterialPageRoute(
-        builder: (_) => EmotionPickerPage(initialEmotions: _emotions),
+        builder: (_) =>
+            EmotionPickerPage(store: widget.store, initialEmotions: _emotions),
       ),
     );
     if (result != null) setState(() => _emotions = result);
@@ -601,7 +969,12 @@ class Field extends StatelessWidget {
 }
 
 class EmotionPickerPage extends StatefulWidget {
-  const EmotionPickerPage({super.key, required this.initialEmotions});
+  const EmotionPickerPage({
+    super.key,
+    required this.store,
+    required this.initialEmotions,
+  });
+  final SmerStore store;
   final List<SmerEmotion> initialEmotions;
 
   @override
@@ -610,11 +983,18 @@ class EmotionPickerPage extends StatefulWidget {
 
 class _EmotionPickerPageState extends State<EmotionPickerPage> {
   late List<SmerEmotion> _emotions;
+  List<CustomEmotion>? _customEmotions;
 
   @override
   void initState() {
     super.initState();
     _emotions = [...widget.initialEmotions];
+    _loadCustomEmotions();
+  }
+
+  Future<void> _loadCustomEmotions() async {
+    final emotions = await widget.store.loadCustomEmotions();
+    if (mounted) setState(() => _customEmotions = emotions);
   }
 
   SmerEmotion? _emotionByName(String name) {
@@ -689,47 +1069,52 @@ class _EmotionPickerPageState extends State<EmotionPickerPage> {
   }
 
   Future<void> _addCustomEmotion() async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
+    final customEmotion = await showDialog<CustomEmotion>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Своя эмоция'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(labelText: 'Название эмоции'),
-          onSubmitted: (value) => Navigator.pop(context, value.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Добавить'),
-          ),
-        ],
+      builder: (_) => _CustomEmotionDialog(
+        groups: <String>{
+          ...emotionGroups.keys,
+          ..._customEmotions!.map((emotion) => emotion.group),
+        }.toList(),
       ),
     );
-    controller.dispose();
-    if (name == null || name.isEmpty) return;
-    if (_emotions.any(
-      (emotion) => emotion.name.toLowerCase() == name.toLowerCase(),
-    )) {
+    if (customEmotion == null) return;
+    final name = customEmotion.name;
+    final existsInCatalog =
+        emotionGroups.values.any(
+          (names) => names.any(
+            (existingName) => existingName.toLowerCase() == name.toLowerCase(),
+          ),
+        ) ||
+        _customEmotions!.any(
+          (emotion) => emotion.name.toLowerCase() == name.toLowerCase(),
+        );
+    if (existsInCatalog) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Эта эмоция уже добавлена.')),
+          const SnackBar(content: Text('Такая эмоция уже есть в каталоге.')),
         );
       }
       return;
     }
+    await widget.store.saveCustomEmotion(customEmotion);
+    if (!mounted) return;
+    setState(() => _customEmotions = [..._customEmotions!, customEmotion]);
     await _editEmotionIntensity(name);
   }
 
   @override
   Widget build(BuildContext context) {
+    final customEmotions = _customEmotions;
+    if (customEmotions == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final groups = <String, List<String>>{
+      for (final group in emotionGroups.entries) group.key: [...group.value],
+    };
+    for (final emotion in customEmotions) {
+      groups.putIfAbsent(emotion.group, () => []).add(emotion.name);
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Эмоции')),
       body: Column(
@@ -772,7 +1157,7 @@ class _EmotionPickerPageState extends State<EmotionPickerPage> {
                   ),
                   const SizedBox(height: 24),
                 ],
-                ...emotionGroups.entries.map(
+                ...groups.entries.map(
                   (group) => Card(
                     clipBehavior: Clip.antiAlias,
                     child: ExpansionTile(
@@ -827,6 +1212,153 @@ class _EmotionPickerPageState extends State<EmotionPickerPage> {
       ),
     );
   }
+}
+
+class _CustomEmotionDialog extends StatefulWidget {
+  const _CustomEmotionDialog({required this.groups});
+
+  final List<String> groups;
+
+  @override
+  State<_CustomEmotionDialog> createState() => _CustomEmotionDialogState();
+}
+
+class _CustomEmotionDialogState extends State<_CustomEmotionDialog> {
+  final _controller = TextEditingController();
+  String? _group;
+  String? _nameError;
+  String? _groupError;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _addGroup() async {
+    final group = await showDialog<String>(
+      context: context,
+      builder: (_) => const _GroupNameDialog(),
+    );
+    if (group != null && group.isNotEmpty && mounted) {
+      setState(() => _group = group);
+    }
+  }
+
+  void _submit() {
+    final name = _controller.text.trim();
+    setState(() {
+      _nameError = name.isEmpty ? 'Введите название эмоции' : null;
+      _groupError = _group == null ? 'Выберите или создайте группу' : null;
+    });
+    if (_nameError != null || _groupError != null) return;
+    Navigator.pop(context, CustomEmotion(name: name, group: _group!));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Своя эмоция'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: InputDecoration(
+              labelText: 'Название эмоции',
+              errorText: _nameError,
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: 20),
+          Text('Группа', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ...widget.groups.map(
+                (group) => ChoiceChip(
+                  label: Text(group),
+                  selected: _group == group,
+                  onSelected: (_) => setState(() => _group = group),
+                ),
+              ),
+              if (_group != null && !widget.groups.contains(_group))
+                ChoiceChip(
+                  label: Text(_group!),
+                  selected: true,
+                  onSelected: (_) {},
+                ),
+              ActionChip(
+                avatar: const Icon(Icons.add, size: 18),
+                label: const Text('Новая группа'),
+                onPressed: _addGroup,
+              ),
+            ],
+          ),
+          if (_groupError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _groupError!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Отмена'),
+      ),
+      FilledButton(onPressed: _submit, child: const Text('Добавить')),
+    ],
+  );
+}
+
+class _GroupNameDialog extends StatefulWidget {
+  const _GroupNameDialog();
+
+  @override
+  State<_GroupNameDialog> createState() => _GroupNameDialogState();
+}
+
+class _GroupNameDialogState extends State<_GroupNameDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final group = _controller.text.trim();
+    if (group.isNotEmpty) Navigator.pop(context, group);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Новая группа'),
+    content: TextField(
+      controller: _controller,
+      autofocus: true,
+      textCapitalization: TextCapitalization.sentences,
+      decoration: const InputDecoration(labelText: 'Название группы'),
+      onSubmitted: (_) => _submit(),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Отмена'),
+      ),
+      FilledButton(onPressed: _submit, child: const Text('Создать')),
+    ],
+  );
 }
 
 String formatDate(DateTime value) =>
