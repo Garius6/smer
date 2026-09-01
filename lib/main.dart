@@ -257,7 +257,9 @@ class UnlockPage extends StatefulWidget {
 class _UnlockPageState extends State<UnlockPage> {
   var _pin = '';
   var _error = false;
-  var _biometricsAvailable = false;
+  bool? _biometricsAvailable;
+  var _showPinEntry = false;
+  var _isAuthenticating = false;
   var _pinLength = 4;
 
   @override
@@ -269,7 +271,9 @@ class _UnlockPageState extends State<UnlockPage> {
 
   Future<void> _loadBiometrics() async {
     final available = await widget.security.canUseBiometrics();
-    if (mounted) setState(() => _biometricsAvailable = available);
+    if (!mounted) return;
+    setState(() => _biometricsAvailable = available);
+    if (available) await _unlockWithBiometrics();
   }
 
   Future<void> _loadPinLength() async {
@@ -299,28 +303,93 @@ class _UnlockPageState extends State<UnlockPage> {
   }
 
   Future<void> _unlockWithBiometrics() async {
-    if (await widget.security.authenticateWithBiometrics() && mounted) {
-      widget.onUnlocked();
-    }
+    if (_isAuthenticating) return;
+    setState(() => _isAuthenticating = true);
+    final authenticated = await widget.security.authenticateWithBiometrics();
+    if (!mounted) return;
+    setState(() => _isAuthenticating = false);
+    if (authenticated) widget.onUnlocked();
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: _PinScreen(
-        title: 'Введите PIN-код',
-        subtitle: 'Дневник защищён и доступен только вам.',
-        value: _pin,
-        length: _pinLength,
-        errorText: _error ? 'Неверный PIN-код' : null,
-        onDigit: _appendDigit,
-        onBackspace: () => setState(
-          () => _pin = _pin.isEmpty ? '' : _pin.substring(0, _pin.length - 1),
-        ),
-        onClear: () => setState(() => _pin = ''),
-        biometricAvailable: _biometricsAvailable,
-        onBiometrics: _unlockWithBiometrics,
+  Widget build(BuildContext context) {
+    if (_biometricsAvailable == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    return Scaffold(
+      body: SafeArea(
+        child: _biometricsAvailable! && !_showPinEntry
+            ? _BiometricUnlockScreen(
+                isAuthenticating: _isAuthenticating,
+                onBiometrics: _unlockWithBiometrics,
+                onUsePin: () => setState(() => _showPinEntry = true),
+              )
+            : _PinScreen(
+                title: 'Введите PIN-код',
+                subtitle: 'Дневник защищён и доступен только вам.',
+                value: _pin,
+                length: _pinLength,
+                errorText: _error ? 'Неверный PIN-код' : null,
+                onDigit: _appendDigit,
+                onBackspace: () => setState(
+                  () => _pin = _pin.isEmpty
+                      ? ''
+                      : _pin.substring(0, _pin.length - 1),
+                ),
+                onClear: () => setState(() => _pin = ''),
+              ),
       ),
+    );
+  }
+}
+
+class _BiometricUnlockScreen extends StatelessWidget {
+  const _BiometricUnlockScreen({
+    required this.isAuthenticating,
+    required this.onBiometrics,
+    required this.onUsePin,
+  });
+
+  final bool isAuthenticating;
+  final VoidCallback onBiometrics;
+  final VoidCallback onUsePin;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(32),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 36),
+        Text(
+          'Откройте дневник',
+          textAlign: TextAlign.center,
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          'Подтвердите личность с помощью биометрии.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+        const Spacer(),
+        Icon(
+          Icons.fingerprint,
+          size: 72,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+        const SizedBox(height: 24),
+        FilledButton.icon(
+          onPressed: isAuthenticating ? null : onBiometrics,
+          icon: const Icon(Icons.fingerprint),
+          label: const Text('Войти по биометрии'),
+        ),
+        const SizedBox(height: 12),
+        TextButton(onPressed: onUsePin, child: const Text('Ввести PIN-код')),
+        const Spacer(flex: 2),
+      ],
     ),
   );
 }
@@ -336,8 +405,6 @@ class _PinScreen extends StatelessWidget {
     required this.onDigit,
     required this.onBackspace,
     required this.onClear,
-    this.biometricAvailable = false,
-    this.onBiometrics,
   });
   final String title;
   final String subtitle;
@@ -348,8 +415,6 @@ class _PinScreen extends StatelessWidget {
   final ValueChanged<String> onDigit;
   final VoidCallback onBackspace;
   final VoidCallback onClear;
-  final bool biometricAvailable;
-  final VoidCallback? onBiometrics;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -393,14 +458,6 @@ class _PinScreen extends StatelessWidget {
           onBackspace: onBackspace,
           onClear: onClear,
         ),
-        if (biometricAvailable) ...[
-          const SizedBox(height: 12),
-          TextButton.icon(
-            onPressed: onBiometrics,
-            icon: const Icon(Icons.fingerprint),
-            label: const Text('Войти по биометрии'),
-          ),
-        ],
       ],
     ),
   );
