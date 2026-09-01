@@ -28,6 +28,9 @@ class SmerEntry {
     required this.emotions,
     required this.bodyReaction,
     required this.behaviorReaction,
+    this.thoughtBelief,
+    this.alternativeThought = '',
+    this.alternativeEmotions = const [],
   });
   final String id;
   final DateTime createdAt;
@@ -37,18 +40,29 @@ class SmerEntry {
   final List<SmerEmotion> emotions;
   final String bodyReaction;
   final String behaviorReaction;
-  Map<String, Object> toRow() => {
+  final int? thoughtBelief;
+  final String alternativeThought;
+  final List<SmerEmotion> alternativeEmotions;
+  Map<String, Object?> toRow() => {
     'id': id,
     'created_at': createdAt.millisecondsSinceEpoch,
     'occurred_at': occurredAt.millisecondsSinceEpoch,
     'situation': situation,
     'thoughts': jsonEncode(thoughts),
     'emotions': jsonEncode(emotions.map((e) => e.toJson()).toList()),
+    'thought_belief': thoughtBelief,
+    'alternative_thought': alternativeThought,
+    'alternative_emotions': jsonEncode(
+      alternativeEmotions.map((e) => e.toJson()).toList(),
+    ),
     'body_reaction': bodyReaction,
     'behavior_reaction': behaviorReaction,
   };
   factory SmerEntry.fromRow(Map<String, Object?> row) {
     final rawEmotions = jsonDecode(row['emotions']! as String) as List<dynamic>;
+    final rawAlternativeEmotions =
+        jsonDecode(row['alternative_emotions'] as String? ?? '[]')
+            as List<dynamic>;
     return SmerEntry(
       id: row['id']! as String,
       createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at']! as int),
@@ -60,6 +74,11 @@ class SmerEntry {
         jsonDecode(row['thoughts']! as String) as List<dynamic>,
       ),
       emotions: rawEmotions
+          .map((e) => SmerEmotion.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+      thoughtBelief: row['thought_belief'] as int?,
+      alternativeThought: row['alternative_thought'] as String? ?? '',
+      alternativeEmotions: rawAlternativeEmotions
           .map((e) => SmerEmotion.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
       bodyReaction: row['body_reaction']! as String,

@@ -703,13 +703,21 @@ class EntryViewPage extends StatelessWidget {
           formatDate(entry.occurredAt),
           style: Theme.of(context).textTheme.labelLarge,
         ),
-        DetailSection(title: 'Ситуация', content: entry.situation),
+        DetailSection(
+          title: 'Ситуация',
+          content: entry.situation.isEmpty ? 'Не указана' : entry.situation,
+        ),
         DetailSection(
           title: 'Мысли',
           content: entry.thoughts.isEmpty
               ? 'Не указаны'
               : entry.thoughts.map((t) => '• $t').join('\n'),
         ),
+        if (entry.thoughtBelief != null)
+          DetailSection(
+            title: 'Убеждённость в ключевой мысли',
+            content: '${entry.thoughtBelief}%',
+          ),
         DetailSection(
           title: 'Эмоции',
           content: entry.emotions.isEmpty
@@ -724,6 +732,18 @@ class EntryViewPage extends StatelessWidget {
               ? 'Не указана'
               : entry.bodyReaction,
         ),
+        if (entry.alternativeThought.isNotEmpty)
+          DetailSection(
+            title: 'Более сбалансированная мысль',
+            content: entry.alternativeThought,
+          ),
+        if (entry.alternativeEmotions.isNotEmpty)
+          DetailSection(
+            title: 'Эмоции после пересмотра',
+            content: entry.alternativeEmotions
+                .map((emotion) => '${emotion.name} — ${emotion.intensity}%')
+                .join('\n'),
+          ),
         DetailSection(
           title: 'Поведенческая реакция',
           content: entry.behaviorReaction.isEmpty
@@ -765,26 +785,35 @@ class _EntryEditorPageState extends State<EntryEditorPage> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _situation;
   late final TextEditingController _thoughts;
+  late final TextEditingController _alternativeThought;
   late final TextEditingController _body;
   late final TextEditingController _behavior;
   late DateTime _occurredAt;
   late List<SmerEmotion> _emotions;
+  late List<SmerEmotion> _alternativeEmotions;
+  late int _thoughtBelief;
   @override
   void initState() {
     super.initState();
     final entry = widget.entry;
     _situation = TextEditingController(text: entry?.situation);
     _thoughts = TextEditingController(text: entry?.thoughts.join('\n'));
+    _alternativeThought = TextEditingController(
+      text: entry?.alternativeThought,
+    );
     _body = TextEditingController(text: entry?.bodyReaction);
     _behavior = TextEditingController(text: entry?.behaviorReaction);
     _occurredAt = entry?.occurredAt ?? DateTime.now();
     _emotions = [...?entry?.emotions];
+    _alternativeEmotions = [...?entry?.alternativeEmotions];
+    _thoughtBelief = entry?.thoughtBelief ?? 50;
   }
 
   @override
   void dispose() {
     _situation.dispose();
     _thoughts.dispose();
+    _alternativeThought.dispose();
     _body.dispose();
     _behavior.dispose();
     super.dispose();
@@ -825,6 +854,21 @@ class _EntryEditorPageState extends State<EntryEditorPage> {
     if (result != null) setState(() => _emotions = result);
   }
 
+  Future<void> _rateEmotionsAgain() async {
+    final result = await Navigator.push<List<SmerEmotion>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EmotionPickerPage(
+          store: widget.store,
+          initialEmotions: _alternativeEmotions.isEmpty
+              ? _emotions
+              : _alternativeEmotions,
+        ),
+      ),
+    );
+    if (result != null) setState(() => _alternativeEmotions = result);
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final now = DateTime.now();
@@ -840,6 +884,9 @@ class _EntryEditorPageState extends State<EntryEditorPage> {
             .where((item) => item.isNotEmpty)
             .toList(),
         emotions: _emotions,
+        thoughtBelief: _thoughtBelief,
+        alternativeThought: _alternativeThought.text.trim(),
+        alternativeEmotions: _alternativeEmotions,
         bodyReaction: _body.text.trim(),
         behaviorReaction: _behavior.text.trim(),
       ),
@@ -855,76 +902,167 @@ class _EntryEditorPageState extends State<EntryEditorPage> {
     body: Form(
       key: _formKey,
       child: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
         children: [
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Дата и время эпизода'),
-            subtitle: Text(formatDate(_occurredAt)),
-            trailing: const Icon(Icons.calendar_today),
-            onTap: _selectDate,
-          ),
-          const SizedBox(height: 12),
-          Field(
-            label: 'Ситуация',
-            hint: 'Что произошло? Только наблюдаемые факты.',
-            controller: _situation,
-            validator: (value) => value == null || value.trim().isEmpty
-                ? 'Опишите ситуацию'
-                : null,
-          ),
-          Field(
-            label: 'Автоматические мысли',
-            hint: 'Каждая мысль с новой строки',
-            controller: _thoughts,
-            maxLines: 4,
-          ),
-          const SizedBox(height: 20),
-          Text('Эмоции', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
           Text(
-            'Отметьте чувства, которые возникли в ситуации.',
+            'Разберите эпизод по шагам',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Записывайте то, что произошло, без попытки оценить себя.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
-          const SizedBox(height: 12),
-          if (_emotions.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _emotions
-                    .map(
-                      (emotion) => InputChip(
-                        label: Text('${emotion.name} ${emotion.intensity}%'),
-                        onDeleted: () =>
-                            setState(() => _emotions.remove(emotion)),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-          FilledButton.tonalIcon(
-            onPressed: _addEmotion,
-            icon: const Icon(Icons.add),
-            label: Text(
-              _emotions.isEmpty ? 'Выбрать эмоции' : 'Изменить эмоции',
-            ),
-          ),
           const SizedBox(height: 20),
-          Field(
-            label: 'Телесная реакция',
-            hint: 'Что происходило в теле?',
-            controller: _body,
-            maxLines: 3,
+          FilledButton.tonalIcon(
+            onPressed: _selectDate,
+            icon: const Icon(Icons.schedule_outlined),
+            label: Text(formatDate(_occurredAt)),
           ),
-          Field(
-            label: 'Поведенческая реакция',
-            hint: 'Что вы сделали или чего избегали?',
-            controller: _behavior,
-            maxLines: 3,
+          const SizedBox(height: 28),
+          EditorSection(
+            number: '1',
+            title: 'Ситуация',
+            hint: 'Что произошло? Только наблюдаемые факты.',
+            child: Field(
+              hint: 'Например: коллега не ответил на сообщение',
+              controller: _situation,
+              minLines: 1,
+              maxLines: 3,
+              validator: (value) => value == null || value.trim().isEmpty
+                  ? 'Опишите ситуацию'
+                  : null,
+            ),
           ),
-          const SizedBox(height: 24),
+          EditorSection(
+            number: '2',
+            title: 'Автоматические мысли',
+            hint: 'Какие слова или образы возникли в тот момент?',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Field(
+                  hint: 'Каждая мысль с новой строки',
+                  controller: _thoughts,
+                  maxLines: 4,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Насколько вы верите в ключевую мысль: $_thoughtBelief%',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                Slider(
+                  value: _thoughtBelief.toDouble(),
+                  max: 100,
+                  divisions: 20,
+                  label: '$_thoughtBelief%',
+                  onChanged: (value) =>
+                      setState(() => _thoughtBelief = value.round()),
+                ),
+              ],
+            ),
+          ),
+          EditorSection(
+            number: '3',
+            title: 'Эмоции',
+            hint: 'Выберите чувства и укажите силу каждой.',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_emotions.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _emotions
+                          .map(
+                            (emotion) => InputChip(
+                              label: Text(
+                                '${emotion.name} ${emotion.intensity}%',
+                              ),
+                              onDeleted: () =>
+                                  setState(() => _emotions.remove(emotion)),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                FilledButton.tonalIcon(
+                  onPressed: _addEmotion,
+                  icon: const Icon(Icons.add_reaction_outlined),
+                  label: Text(
+                    _emotions.isEmpty ? 'Выбрать эмоции' : 'Изменить эмоции',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 28),
+            child: ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(top: 12),
+              leading: const Icon(Icons.auto_awesome_outlined),
+              title: const Text('Пересмотреть мысль (необязательно)'),
+              subtitle: const Text(
+                'Добавьте более сбалансированный взгляд, если хотите.',
+              ),
+              initiallyExpanded:
+                  _alternativeThought.text.isNotEmpty ||
+                  _alternativeEmotions.isNotEmpty,
+              children: [
+                Field(
+                  hint: 'Более сбалансированная мысль',
+                  controller: _alternativeThought,
+                  minLines: 2,
+                  maxLines: 4,
+                ),
+                const SizedBox(height: 12),
+                if (_alternativeEmotions.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _alternativeEmotions
+                          .map(
+                            (emotion) => InputChip(
+                              label: Text(
+                                '${emotion.name} ${emotion.intensity}%',
+                              ),
+                              onDeleted: () => setState(
+                                () => _alternativeEmotions.remove(emotion),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                OutlinedButton.icon(
+                  onPressed: _rateEmotionsAgain,
+                  icon: const Icon(Icons.refresh_outlined),
+                  label: const Text('Оценить эмоции повторно'),
+                ),
+              ],
+            ),
+          ),
+          EditorSection(
+            number: '4',
+            title: 'Реакции',
+            hint: 'Заметьте, как отреагировали тело и поведение.',
+            child: Column(
+              children: [
+                Field(hint: 'Телесная реакция', controller: _body, maxLines: 3),
+                const SizedBox(height: 12),
+                Field(
+                  hint: 'Поведенческая реакция',
+                  controller: _behavior,
+                  maxLines: 3,
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     ),
@@ -941,29 +1079,72 @@ class _EntryEditorPageState extends State<EntryEditorPage> {
 class Field extends StatelessWidget {
   const Field({
     super.key,
-    required this.label,
     required this.hint,
     required this.controller,
-    this.maxLines = 2,
+    this.maxLines = 1,
+    this.minLines,
     this.validator,
   });
-  final String label;
   final String hint;
   final TextEditingController controller;
   final int maxLines;
+  final int? minLines;
   final String? Function(String?)? validator;
   @override
+  Widget build(BuildContext context) => TextFormField(
+    controller: controller,
+    maxLines: maxLines,
+    minLines: minLines ?? maxLines,
+    validator: validator,
+    decoration: InputDecoration(
+      hintText: hint,
+      alignLabelWithHint: maxLines > 1,
+      filled: true,
+      fillColor: Theme.of(context).colorScheme.surface,
+      border: const OutlineInputBorder(),
+    ),
+  );
+}
+
+class EditorSection extends StatelessWidget {
+  const EditorSection({
+    super.key,
+    required this.number,
+    required this.title,
+    required this.hint,
+    required this.child,
+  });
+
+  final String number;
+  final String title;
+  final String hint;
+  final Widget child;
+
+  @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 16),
-    child: TextFormField(
-      controller: controller,
-      maxLines: maxLines,
-      validator: validator,
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        border: const OutlineInputBorder(),
-      ),
+    padding: const EdgeInsets.only(bottom: 28),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            CircleAvatar(
+              radius: 14,
+              backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+              child: Text(
+                number,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(hint, style: Theme.of(context).textTheme.bodyMedium),
+        const SizedBox(height: 12),
+        child,
+      ],
     ),
   );
 }

@@ -12,12 +12,18 @@ void main() {
       situation: 'Коллега не ответил',
       thoughts: ['Я ему не важен'],
       emotions: [const SmerEmotion(name: 'Тревога', intensity: 75)],
+      thoughtBelief: 80,
+      alternativeThought: 'Он может быть занят.',
+      alternativeEmotions: [const SmerEmotion(name: 'Тревога', intensity: 45)],
       bodyReaction: 'Напряжение',
       behaviorReaction: 'Проверял сообщения',
     );
     final restored = SmerEntry.fromRow(entry.toRow());
     expect(restored.situation, entry.situation);
     expect(restored.emotions.single.intensity, 75);
+    expect(restored.thoughtBelief, 80);
+    expect(restored.alternativeThought, 'Он может быть занят.');
+    expect(restored.alternativeEmotions.single.intensity, 45);
     expect(restored.thoughts, ['Я ему не важен']);
   });
 

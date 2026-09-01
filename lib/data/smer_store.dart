@@ -25,10 +25,10 @@ class SqliteSmerStore implements SmerStore {
     _database = await sqlcipher.openDatabase(
       encryptedPath,
       password: databasePassword,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute(
-          'CREATE TABLE entries(id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, occurred_at INTEGER NOT NULL, situation TEXT NOT NULL, thoughts TEXT NOT NULL, emotions TEXT NOT NULL, body_reaction TEXT NOT NULL, behavior_reaction TEXT NOT NULL)',
+          "CREATE TABLE entries(id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, occurred_at INTEGER NOT NULL, situation TEXT NOT NULL, thoughts TEXT NOT NULL, emotions TEXT NOT NULL, thought_belief INTEGER, alternative_thought TEXT NOT NULL DEFAULT '', alternative_emotions TEXT NOT NULL DEFAULT '[]', body_reaction TEXT NOT NULL, behavior_reaction TEXT NOT NULL)",
         );
         await db.execute(
           'CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)',
@@ -37,6 +37,17 @@ class SqliteSmerStore implements SmerStore {
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) await _createEmotionCatalog(db);
+        if (oldVersion < 3) {
+          await db.execute(
+            'ALTER TABLE entries ADD COLUMN thought_belief INTEGER',
+          );
+          await db.execute(
+            "ALTER TABLE entries ADD COLUMN alternative_thought TEXT NOT NULL DEFAULT ''",
+          );
+          await db.execute(
+            "ALTER TABLE entries ADD COLUMN alternative_emotions TEXT NOT NULL DEFAULT '[]'",
+          );
+        }
       },
     );
     return _database!;
