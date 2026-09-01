@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'data/smer_store.dart';
+import 'models/journal_analysis.dart';
 import 'models/smer_entry.dart';
 
 const emotionGroups = {
@@ -40,6 +42,9 @@ class SmerApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
     title: 'СМЭР',
     debugShowCheckedModeBanner: false,
+    locale: const Locale('ru'),
+    localizationsDelegates: GlobalMaterialLocalizations.delegates,
+    supportedLocales: const [Locale('ru')],
     theme: ThemeData(
       colorScheme: ColorScheme.fromSeed(
         seedColor: const Color(0xFF9B5A42),
@@ -111,7 +116,23 @@ class _JournalPageState extends State<JournalPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('СМЭР')),
+    appBar: AppBar(
+      title: const Text('СМЭР'),
+      actions: [
+        TextButton.icon(
+          onPressed: _entries == null
+              ? null
+              : () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AnalysisPage(entries: _entries!),
+                  ),
+                ),
+          icon: const Icon(Icons.insights_outlined),
+          label: const Text('Анализ'),
+        ),
+      ],
+    ),
     body: _entries == null
         ? const Center(child: CircularProgressIndicator())
         : _entries!.isEmpty
@@ -169,6 +190,89 @@ class EntryCard extends StatelessWidget {
         '${formatDate(entry.occurredAt)}${entry.emotions.isEmpty ? '' : ' · ${entry.emotions.map((e) => '${e.name} ${e.intensity}%').join(', ')}'}',
       ),
       trailing: const Icon(Icons.chevron_right),
+    ),
+  );
+}
+
+class AnalysisPage extends StatelessWidget {
+  const AnalysisPage({super.key, required this.entries});
+  final List<SmerEntry> entries;
+
+  @override
+  Widget build(BuildContext context) {
+    final analysis = JournalAnalysis.fromEntries(entries);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Анализ')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Text(
+            'Ваши наблюдения',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Это сводка данных из ваших записей, а не оценка психологического состояния.',
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
+          const SizedBox(height: 24),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  _AnalysisMetric(
+                    value: '${analysis.entryCount}',
+                    label: 'записей',
+                  ),
+                  const SizedBox(width: 24),
+                  _AnalysisMetric(
+                    value: '${analysis.emotionCount}',
+                    label: 'эмоций отмечено',
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text('Частые эмоции', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          if (analysis.emotions.isEmpty)
+            const Text(
+              'Добавьте эмоции в записи, чтобы увидеть закономерности.',
+            )
+          else
+            ...analysis.emotions
+                .take(5)
+                .map(
+                  (emotion) => Card(
+                    child: ListTile(
+                      title: Text(emotion.name),
+                      subtitle: Text(
+                        '${emotion.count} раз · средняя интенсивность ${emotion.averageIntensity}%',
+                      ),
+                    ),
+                  ),
+                ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AnalysisMetric extends StatelessWidget {
+  const _AnalysisMetric({required this.value, required this.label});
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(value, style: Theme.of(context).textTheme.headlineMedium),
+        Text(label, style: Theme.of(context).textTheme.bodyMedium),
+      ],
     ),
   );
 }
@@ -326,17 +430,21 @@ class _EntryEditorPageState extends State<EntryEditorPage> {
       lastDate: DateTime.now(),
       initialDate: _occurredAt,
     );
-    if (date != null) {
-      setState(
-        () => _occurredAt = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          _occurredAt.hour,
-          _occurredAt.minute,
-        ),
-      );
-    }
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_occurredAt),
+    );
+    if (time == null || !mounted) return;
+    setState(
+      () => _occurredAt = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      ),
+    );
   }
 
   Future<void> _addEmotion() async {
@@ -383,7 +491,7 @@ class _EntryEditorPageState extends State<EntryEditorPage> {
         children: [
           ListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('Дата эпизода'),
+            title: const Text('Дата и время эпизода'),
             subtitle: Text(formatDate(_occurredAt)),
             trailing: const Icon(Icons.calendar_today),
             onTap: _selectDate,
